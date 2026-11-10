@@ -1,0 +1,22 @@
+PASOS PARA PUBLICAR VIERNES (gratis en Render)
+
+1. Crea una cuenta en github.com y un repositorio nuevo llamado "viernes".
+   Sube TODOS estos archivos respetando la carpeta "static".
+   (Botón "Add file" > "Upload files").
+2. Crea una cuenta en render.com y elige New > Web Service.
+   Conecta tu repositorio de GitHub.
+3. Configura:
+   - Runtime: Python
+   - Build Command:  pip install -r requirements.txt
+   - Start Command:  gunicorn server:app --timeout 120
+   - Plan: Free
+4. En "Environment" agrega estas variables:
+   - GEMINI_API_KEY = tu clave de AI Studio
+   - APP_PASSWORD   = una clave que inventes (evita que otros gasten tu cuota)
+5. Deploy. Render te da un link tipo https://viernes.onrender.com
+6. Abre ese link en el celular. En Chrome: menú > "Instalar app".
+   En iPhone (Safari): Compartir > "Añadir a pantalla de inicio".
+
+NOTAS
+- El plan gratis de Render se "duerme" tras un rato sin uso: la primera respuesta puede tardar ~1 minuto.
+- Nunca subas tu API key a GitHub. Solo va en las variables de Render.
