@@ -77,7 +77,9 @@ dialog select{padding:8px;border-radius:8px;border:1px solid var(--line);backgro
   <textarea id="txt" rows="1" placeholder="¿En qué piensas?"></textarea>
   <div class="fila">
    <input type="file" id="arch" multiple hidden accept="image/*,audio/*,.pdf,.txt,.md">
+   <input type="file" id="cam" accept="image/*" capture="environment" hidden>
    <button type="button" class="ib" id="clip" aria-label="Adjuntar">＋</button>
+   <button type="button" class="ib" id="foto" aria-label="Sacar foto">📷</button>
    <button type="button" class="ib" id="mic" aria-label="Dictar">🎤</button>
    <button type="button" class="ib" id="auto" aria-label="Leer respuestas en voz alta">🔊</button>
    <span class="esp"></span>
@@ -88,7 +90,11 @@ dialog select{padding:8px;border-radius:8px;border:1px solid var(--line);backgro
 
 <dialog id="dlg">
  <h3>Ajustes</h3>
- <label for="voz">Voz</label><select id="voz"></select>
+ <label for="motor">Motor de voz</label>
+ <select id="motor"><option value="gemini">Gemini (natural)</option><option value="local">Voz del celular</option></select>
+ <label for="vg">Voz de Gemini</label>
+ <select id="vg"><option>Kore</option><option>Puck</option><option>Aoede</option><option>Leda</option><option>Zephyr</option><option>Charon</option><option>Fenrir</option><option>Orus</option></select>
+ <label for="voz">Voz del celular</label><select id="voz"></select>
  <label for="vel">Velocidad</label><input type="range" id="vel" min="0.7" max="1.4" step="0.05" value="1">
  <label for="tono">Tono</label><input type="range" id="tono" min="0.7" max="1.5" step="0.05" value="1">
  <label for="tema">Tema</label>
@@ -101,7 +107,7 @@ const $=s=>document.querySelector(s);
 const col=$("#col"),chat=$("#chat"),txt=$("#txt"),arch=$("#arch");
 const LS={get(k,d){try{const v=localStorage.getItem(k);return v===null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 let historial=LS.get("hist",[]),adjuntos=[],ocupado=false;
-let ajustes=LS.get("aj",{voz:"",vel:1,tono:1,auto:false,tema:"auto"});
+let ajustes=Object.assign({voz:"",vel:1,tono:1,auto:false,tema:"auto",motor:"gemini",vg:"Kore"},LS.get("aj",{}));
 
 /* ---------- tema ---------- */
 function aplicaTema(){const r=document.documentElement;ajustes.tema==="auto"?r.removeAttribute("data-theme"):r.setAttribute("data-theme",ajustes.tema)}
@@ -134,7 +140,7 @@ function cargaVoces(){
 }
 if(sint){cargaVoces();sint.onvoiceschanged=cargaVoces}
 function limpiar(t){return t.replace(/```[\s\S]*?```/g," ").replace(/[*_`#>]/g,"").replace(/\p{Extended_Pictographic}/gu,"").replace(/\s+/g," ").trim()}
-function hablar(t){
+function hablarLocal(t){
   if(!sint)return;
   sint.cancel();
   const partes=limpiar(t).match(/[^.!?¡¿\n]+[.!?]*/g)||[];
@@ -150,7 +156,24 @@ function hablar(t){
     sint.speak(u);
   });
 }
-function callar(){if(sint)sint.cancel();$("#orb").classList.remove("habla")}
+const SILENCIO="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+const player=new Audio();
+function callar(){if(sint)sint.cancel();player.pause();$("#orb").classList.remove("habla")}
+async function hablar(t){
+  callar();
+  if(ajustes.motor==="gemini"){
+    try{
+      $("#orb").classList.add("habla");
+      const r=await fetch("/voz",{method:"POST",headers:{"Content-Type":"application/json","X-Clave":LS.get("clave","")},
+        body:JSON.stringify({text:limpiar(t).slice(0,1800),voice:ajustes.vg})});
+      if(!r.ok)throw new Error("voz");
+      player.src=URL.createObjectURL(await r.blob());
+      player.onended=()=>$("#orb").classList.remove("habla");
+      await player.play();return;
+    }catch(e){$("#orb").classList.remove("habla")}
+  }
+  hablarLocal(t);
+}
 
 /* ---------- mensajes ---------- */
 function saludo(){
@@ -185,6 +208,12 @@ function chips(){
   });
 }
 $("#clip").onclick=()=>arch.click();
+$("#foto").onclick=()=>$("#cam").click();
+$("#cam").onchange=e=>{
+  const f=e.target.files[0];
+  if(f){const n="foto-"+Date.now()+".jpg";adjuntos.push(new File([f],n,{type:f.type||"image/jpeg"}));chips()}
+  e.target.value="";
+};
 arch.onchange=()=>{adjuntos.push(...arch.files);arch.value="";chips()};
 
 /* ---------- dictado ---------- */
@@ -214,7 +243,7 @@ $("#f").onsubmit=async e=>{
   if(ocupado||(!t&&!adjuntos.length))return;
   ocupado=true;$("#enviar").disabled=true;
   // desbloquea la voz en iPhone (necesita un toque del usuario)
-  if(sint&&ajustes.auto){const u=new SpeechSynthesisUtterance(" ");u.volume=0;sint.speak(u)}
+  if(ajustes.auto){player.src=SILENCIO;player.play().catch(()=>{});if(sint){const u=new SpeechSynthesisUtterance(" ");u.volume=0;sint.speak(u)}}
   const s=$("#saludo");if(s)s.remove();
   añadeYo((t||"(archivo)")+(adjuntos.length?"\n📎 "+adjuntos.map(f=>f.name).join(", "):""));
   const fd=new FormData();
@@ -244,10 +273,10 @@ const dlg=$("#dlg");
 function pintaAuto(){$("#auto").classList.toggle("on",!!ajustes.auto)}
 pintaAuto();
 $("#auto").onclick=()=>{ajustes.auto=!ajustes.auto;LS.set("aj",ajustes);pintaAuto();if(!ajustes.auto)callar()};
-$("#ajustes").onclick=()=>{$("#vel").value=ajustes.vel;$("#tono").value=ajustes.tono;$("#tema").value=ajustes.tema;if(ajustes.voz)$("#voz").value=ajustes.voz;dlg.showModal()};
+$("#ajustes").onclick=()=>{$("#vel").value=ajustes.vel;$("#tono").value=ajustes.tono;$("#tema").value=ajustes.tema;$("#motor").value=ajustes.motor;$("#vg").value=ajustes.vg;if(ajustes.voz)$("#voz").value=ajustes.voz;dlg.showModal()};
 $("#cerrar").onclick=()=>dlg.close();
-function guarda(){ajustes.voz=$("#voz").value;ajustes.vel=+$("#vel").value;ajustes.tono=+$("#tono").value;ajustes.tema=$("#tema").value;LS.set("aj",ajustes);aplicaTema()}
-["voz","vel","tono","tema"].forEach(id=>$("#"+id).addEventListener("change",guarda));
+function guarda(){ajustes.voz=$("#voz").value;ajustes.vel=+$("#vel").value;ajustes.tono=+$("#tono").value;ajustes.tema=$("#tema").value;ajustes.motor=$("#motor").value;ajustes.vg=$("#vg").value;LS.set("aj",ajustes);aplicaTema()}
+["voz","vel","tono","tema","motor","vg"].forEach(id=>$("#"+id).addEventListener("change",guarda));
 $("#probar").onclick=()=>{guarda();hablar("Hola, soy Viernes. Así voy a sonar cuando te responda.")};
 $("#borrar").onclick=()=>{historial=[];LS.set("hist",[]);pinta();dlg.close()};
 $("#nuevo").onclick=()=>{callar();historial=[];LS.set("hist",[]);pinta()};

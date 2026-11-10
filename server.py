@@ -1,5 +1,5 @@
-import os, json, time
-from flask import Flask, request, jsonify
+import os, io, json, time, wave
+from flask import Flask, request, jsonify, Response
 from google import genai
 from google.genai import types
 
@@ -116,6 +116,64 @@ def chat():
                     continue
                 break
     return jsonify(error="No pude responder ahora: " + str(ultimo)[:200]), 502
+
+
+_tts = None
+
+
+def modelos_tts():
+    global _tts
+    if _tts is None:
+        lista = []
+        if os.environ.get("TTS_MODEL"):
+            lista.append(os.environ["TTS_MODEL"])
+        enc = []
+        for m in client.models.list():
+            n = m.name.replace("models/", "")
+            if "tts" in n:
+                enc.append(n)
+        lista += sorted(enc, reverse=True)
+        _tts = lista
+    return _tts
+
+
+@app.post("/voz")
+def voz():
+    if CLAVE_APP and request.headers.get("X-Clave", "") != CLAVE_APP:
+        return jsonify(error="Clave incorrecta."), 401
+    datos = request.get_json(silent=True) or {}
+    texto = (datos.get("text") or "").strip()[:1800]
+    nombre_voz = datos.get("voice") or "Kore"
+    if not texto:
+        return jsonify(error="Sin texto."), 400
+
+    ultimo = None
+    for modelo in modelos_tts()[:3]:
+        try:
+            r = client.models.generate_content(
+                model=modelo,
+                contents=texto,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=nombre_voz)
+                        )
+                    ),
+                ),
+            )
+            pcm = r.candidates[0].content.parts[0].inline_data.data
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(24000)
+                w.writeframes(pcm)
+            return Response(buf.getvalue(), mimetype="audio/wav")
+        except Exception as e:
+            ultimo = e
+            continue
+    return jsonify(error="No pude generar la voz: " + str(ultimo)[:200]), 502
 
 
 if __name__ == "__main__":
