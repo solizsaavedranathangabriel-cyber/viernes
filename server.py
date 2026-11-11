@@ -6,6 +6,16 @@ from google.genai import types
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB
 
+from werkzeug.exceptions import HTTPException
+
+
+@app.errorhandler(Exception)
+def error_general(e):
+    if isinstance(e, HTTPException):
+        return jsonify(error=e.description), e.code
+    return jsonify(error="Error del servidor: " + str(e)[:300]), 500
+
+
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 CLAVE_APP = os.environ.get("APP_PASSWORD", "")
 
